@@ -1,14 +1,13 @@
 # MiniML
 
-A 
+A compiler for a subset of OCaml.
 
 ## Roadmap:
 
 Implemented:
-- None yet!
+- lexer and parser
 
 Todo:
-- lexer and parser
 - type-checker
 - frontend for viewing multiple compiler passes simultaneously
   - have ability to highlight corresponding sections of code between passes
