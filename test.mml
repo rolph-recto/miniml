@@ -1,0 +1,24 @@
+type 'a list =
+  | Cons of 'a * ('a list) -> 'a -> 'a
+  | Nil
+;;
+
+let f (lst : 'a list) =
+  match lst with
+  | Cons(hd, _) -> hd + (f tl)
+  | Nil -> 0
+;;
+
+let g x y z =
+  if x
+  then y
+  else z
+;;
+
+let h = (fun x -> { name=x; age=12 } >>= "FUCK") ;; 
+
+let k x = x.name.nice ;;
+
+let m x = x.name.nice && true ;;
+
+let n x = x.name.nice && true;;
