@@ -1,0 +1,45 @@
+Name: MiniML
+Version: 0.1
+Synopsis: A compiler for an ML-style language
+Authors: Rolph Recto  <rolph.recto@gmail.com>
+License: MIT
+
+OASISFormat: 0.4
+BuildTools: ocamlbuild
+Plugins: META (0.4), DevFiles (0.4)
+
+Executable "miniml"
+  Path: src
+  MainIs: miniml.ml
+  CompiledObject: native
+  BuildDepends:
+    core,
+    sexplib,
+    ppx_sexp_conv
+
+Library "miniml"
+  FindLibName: miniml
+  Path: src
+  Modules:
+    Miniml_parser,
+    Miniml_lexer,
+    Ast
+
+Executable "test_miniml"
+  Path: test
+  MainIs: test.ml
+  Build$: flag(tests)
+  CompiledObject: native
+  Install: false
+  BuildDepends:
+    miniml,
+    oUnit,
+    core,
+    sexplib,
+    ppx_sexp_conv
+
+Test "miniml"
+  Run$: flag(tests)
+  TestTools: test_miniml
+  Command: $test_miniml
+  WorkingDirectory: test
