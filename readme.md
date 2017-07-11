@@ -8,7 +8,9 @@ Implemented:
 - lexer and parser
 
 Todo:
-- type-checker
+- FIX operator
+- Hindley-Milner type-checker
+  - typechecking rules for patterns, tuples, matches, records and fields
 - frontend for viewing multiple compiler passes simultaneously
   - have ability to highlight corresponding sections of code between passes
 

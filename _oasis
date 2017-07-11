@@ -23,7 +23,8 @@ Library "miniml"
   Modules:
     Miniml_parser,
     Miniml_lexer,
-    Ast
+    Ast,
+    Typecheck
 
 Executable "test_miniml"
   Path: test

@@ -2,3 +2,9 @@ _build/*
 *.native
 *.swp
 *.log
+*.mllib
+*.mldylib
+setup.ml
+_tags
+myocamlbuild.ml
+

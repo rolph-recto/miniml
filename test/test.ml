@@ -34,17 +34,17 @@ let test_parse fail_msg prog expected =
 let parse_test1 ctx =
   let prog = "
     type 'a list =
-      | Cons of 'a * ('a list) -> 'a -> 'a
+      | Cons of ('a * ('a list)) -> 'a -> 'a
       | Nil
     ;;"
   in
   let expected = "
-    (Typedef
-     (TySum list ('a)
+  (Typedef
+    (TySum list('a)
       ((ConDef Cons
-        (TyFunc (TyProd (TyVar 'a) (TyCon list ((TyVar 'a))))
-         (TyFunc (TyVar 'a) (TyVar 'a))))
-       (ConDefEmpty Nil))))"
+        (TyFunc (TyProd ((TyVar 'a) (TyCon list((TyVar 'a)))))
+                (TyFunc(TyVar 'a)(TyVar 'a))))
+      (ConDefEmpty Nil))))"
   in
   test_parse "test 1 failed!" prog expected
 
@@ -118,6 +118,15 @@ let parse_test6 ctx =
   in
   test_parse "test 6 failed!" prog expected
 
+let parse_test7 ctx =
+  let prog = "
+    let k = (1, 2, 3) ;;"
+  in
+  let expected = "
+    (Expr (Let (Id k) (Tuple ((ILit 1) (ILit 2) (ILit 3)))))"
+  in
+  test_parse "test 7 failed!" prog expected
+
 let suite =
   "parser" >::: [
     "parse_test1" >:: parse_test1;
@@ -126,6 +135,7 @@ let suite =
     "parse_test4" >:: parse_test4;
     "parse_test5" >:: parse_test5;
     "parse_test6" >:: parse_test6;
+    "parse_test7" >:: parse_test7;
   ]
 ;;
 

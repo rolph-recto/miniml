@@ -1,6 +1,8 @@
 open Core.Std
 open Miniml_lexer
 open Lexing
+open Ast
+open Typecheck
 
 let print_position outx lexbuf =
   let pos = lexbuf.lex_curr_p in
@@ -8,7 +10,14 @@ let print_position outx lexbuf =
     pos.pos_lnum (pos.pos_cnum - pos.pos_bol + 1)
 
 let parse_with_error lexbuf =
-  try Miniml_parser.prog Miniml_lexer.read lexbuf with
+  try begin
+    let get_type p =
+      match p with
+      | Typedef(_) -> (p, Error(UnboundVar("lol")))
+      | Expr(e) -> (p, check_type e)
+    in
+    Miniml_parser.prog Miniml_lexer.read lexbuf |> List.map ~f:get_type
+  end with
   | SyntaxError msg ->
     printf "%a: %s\n" print_position lexbuf msg;
     []
@@ -17,12 +26,17 @@ let parse_with_error lexbuf =
     printf "%a: syntax error\n" print_position lexbuf;
     []
 
+let print_sexp sexp =  Sexp.to_string_hum sexp |> printf "%s\n\n"
+
 let rec parse_and_print lexbuf =
-  List.iter (parse_with_error lexbuf)
-    ~f:(fun p ->
-          Ast.sexp_of_progdef p
-       |> Sexp.to_string_hum
-       |> printf "%s\n\n")
+  let print_ast_and_type (p, t) =
+    Ast.sexp_of_progdef p |> print_sexp;
+    match t with
+    | Ok(ty) -> Ast.sexp_of_tyname ty |> print_sexp
+    | Error(tyerr) -> Typecheck.sexp_of_tyerror tyerr |> print_sexp
+  in 
+  List.iter (parse_with_error lexbuf) ~f:print_ast_and_type
+;;
 
 let loop filename () =
   let inx = In_channel.create filename in

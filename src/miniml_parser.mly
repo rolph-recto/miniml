@@ -63,7 +63,7 @@ tyfield_list:
 tyname: 
   | args = tyname_list; tycon = ID      { TyCon(tycon, args) }
 
-  | t1 = tyname; STAR; t2 = tyname      { TyProd(t1, t2) }
+  | hd = tyname; STAR; tl = typrod_list { TyProd(hd::tl) }
 
   | LBRAC; fields = tyfield_list; RBRAC { TyRec(fields) }
 
@@ -78,6 +78,11 @@ tyname_list:
   | tl = tyname_list; hd = tyname       { tl@[hd] }
   | v = tyname                          { [v] }
   | (* empty *)                         { [] }
+  ;
+
+typrod_list:
+  | tl = typrod_list; STAR; hd = tyname   { tl@[hd] }
+  | v = tyname                            { [v] }
   ;
 
 tyvar_list:

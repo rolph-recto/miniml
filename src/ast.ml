@@ -11,7 +11,7 @@ type tyfield = {
 (* type names *)
 and tyname =
   | TyCon of name * tyname list
-  | TyProd of tyname * tyname
+  | TyProd of tyname list
   | TyRec of tyfield list
   | TyVar of name
   | TyFunc of tyname * tyname
@@ -59,6 +59,10 @@ and expr =
   | Tuple of expr list (* list must be non-empty, otherwise it's a unit *)
   | Rec of field list
   | Field of expr * name
+  (* TODO:
+   * Add binding val to LET
+   * Add constructors for algebraic data types!
+   *)
   | Let of id * expr
   | Match of expr * case list
   | Cond of expr * expr * expr
@@ -70,3 +74,11 @@ type progdef =
   | Expr of expr
   | Typedef of tydef
   [@@deriving sexp]
+
+(* base/primitive types *)
+let type_int     = TyCon("int", [])
+let type_float   = TyCon("float", [])
+let type_string  = TyCon("string", [])
+let type_bool    = TyCon("bool", [])
+let type_unit    = TyCon("unit", [])
+
