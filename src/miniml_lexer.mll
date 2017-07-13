@@ -81,6 +81,8 @@ rule read =
 
   | "fun"                   { FUN }
 
+  | "in"                    { IN }
+
   | int_lit                 { INT (int_of_string (Lexing.lexeme lexbuf)) }
 
   | float_lit               { FLOAT (float_of_string (Lexing.lexeme lexbuf)) }

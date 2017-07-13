@@ -17,7 +17,7 @@ and tyname =
   | TyFunc of tyname * tyname
   [@@deriving sexp] ;;
 
-(* (value) constructors *)
+(* value constructors *)
 type condef =
   | ConDef of name * tyname
   | ConDefEmpty of name
@@ -34,6 +34,12 @@ type id =
   | Id of name
   | IdWithType of name * tyname
   [@@deriving sexp]
+
+let name_of_id (id : id) : name =
+  match id with
+  | Id(name) -> name
+  | IdWithType(name,t) -> name
+;;
 
 type pattern = 
   | PatCon of string * pattern list
@@ -63,7 +69,7 @@ and expr =
    * Add binding val to LET
    * Add constructors for algebraic data types!
    *)
-  | Let of id * expr
+  | Let of id * expr * expr
   | Match of expr * case list
   | Cond of expr * expr * expr
   | Func of id * expr
@@ -71,7 +77,7 @@ and expr =
   [@@deriving sexp]
 
 type progdef =
-  | Expr of expr
+  | Binding of id * expr
   | Typedef of tydef
   [@@deriving sexp]
 

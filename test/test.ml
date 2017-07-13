@@ -57,13 +57,12 @@ let parse_test2 ctx =
     ;;"
   in
   let expected = "
-    (Expr
-     (Let (Id f)
+    (Binding (Id f)
       (Func (IdWithType lst (TyCon list ((TyVar 'a))))
        (Match (Var lst)
         (((match_pat (PatCon Cons ((PatVar hd) (PatVar _))))
           (body (App (App (Var +) (Var hd)) (App (Var f) (Var tl)))))
-         ((match_pat (PatCon Nil ())) (body (ILit 0))))))))"
+         ((match_pat (PatCon Nil ())) (body (ILit 0)))))))"
   in
   test_parse "test 2 failed!" prog expected
 
@@ -76,9 +75,8 @@ let parse_test3 ctx =
     ;;"
   in
   let expected = "
-    (Expr
-     (Let (Id g)
-      (Func (Id x) (Func (Id y) (Func (Id z) (Cond (Var x) (Var y) (Var z)))))))"
+    (Binding (Id g)
+      (Func (Id x) (Func (Id y) (Func (Id z) (Cond (Var x) (Var y) (Var z))))))"
   in
   test_parse "test 3 failed!" prog expected
 
@@ -87,13 +85,12 @@ let parse_test4 ctx =
     let h = (fun x -> { name=x; age=12 } >>= \"NICE\") ;;"
   in
   let expected = "
-    (Expr
-     (Let (Id h)
+    (Binding (Id h)
       (Func (Id x)
        (App
         (App (Var >>=)
          (Rec (((name name) (value (Var x))) ((name age) (value (ILit 12))))))
-        (SLit NICE)))))"
+        (SLit NICE))))"
   in
   test_parse "test 4 failed!" prog expected
 
@@ -102,7 +99,7 @@ let parse_test5 ctx =
     let k x = x.name.nice ;;
   " in
   let expected = "
-    (Expr (Let (Id k) (Func (Id x) (Field (Field (Var x) name) nice))))"
+    (Binding (Id k) (Func (Id x) (Field (Field (Var x) name) nice)))"
   in
   test_parse "test 5 failed!" prog expected
 
@@ -111,10 +108,9 @@ let parse_test6 ctx =
     let m x = x.name.nice && true ;;"
   in
   let expected = "
-    (Expr
-     (Let (Id m)
+    (Binding (Id m)
       (Func (Id x)
-       (App (App (Var &&) (Field (Field (Var x) name) nice)) (BLit true)))))"
+       (App (App (Var &&) (Field (Field (Var x) name) nice)) (BLit true))))"
   in
   test_parse "test 6 failed!" prog expected
 
@@ -123,7 +119,7 @@ let parse_test7 ctx =
     let k = (1, 2, 3) ;;"
   in
   let expected = "
-    (Expr (Let (Id k) (Tuple ((ILit 1) (ILit 2) (ILit 3)))))"
+    (Binding (Id k) (Tuple ((ILit 1) (ILit 2) (ILit 3))))"
   in
   test_parse "test 7 failed!" prog expected
 

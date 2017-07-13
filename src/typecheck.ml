@@ -16,6 +16,8 @@ type tyerror =
   | UnificationFails of (tyname list) * (tyname list)
   | InfiniteType of name * tyname
   | UnboundVar of name
+  | FieldNotFound of tyname * name
+  | DuplicateField of tyname * name
   [@@deriving sexp] ;;
 
 exception TypecheckError of tyerror
@@ -177,7 +179,9 @@ let generalize (env : tyenv) (t : tyname) : tyscheme =
 ;;
 
 (* whenever we lookup a binding, "monomorphize" by instantiating
- * free vars with fresh vars. this allows for let-generalization *)
+ * free vars with fresh vars. this allows for let-generalization by
+ * instantiating fresh vars for a binding's type scheme at every call site
+ *)
 let lookupEnv (st : infer_st) (env : tyenv) (x : name) : tyname = 
   match Map.find env x with
   | None    -> type_error (UnboundVar(x))
@@ -185,7 +189,11 @@ let lookupEnv (st : infer_st) (env : tyenv) (x : name) : tyname =
 ;;
 
 let add_constraint (st : infer_st) (t1 : tyname) (t2 : tyname) : unit = 
-  st.constraints <- (t1,t2)::st.constraints
+  st.constraints <- (t1,t2)::(st.constraints)
+;;
+
+let field_compare (f1 : tyfield) (f2 : tyfield) : int =
+  String.compare (f1.name) (f2.name)
 ;;
 
 let rec infer (st : infer_st) (env : tyenv) (e : expr) : tyname =
@@ -211,18 +219,62 @@ let rec infer (st : infer_st) (env : tyenv) (e : expr) : tyname =
       let t = infer st env f.value in
       { name=f.name; tyname=t }
     in
-    let field_compare (f1 : tyfield) (f2 : tyfield) =
-      String.compare (f1.name) (f2.name)
-    in
     let tyfields  = List.map fields field_to_tyfield in
     let tyfields' = List.sort field_compare tyfields in
     TyRec(tyfields')
 
-  | Field(record, name) -> type_error (UnboundVar("implement_field_infer"))
+  (* a limitation here: we assert that the type of `r` can be inferred to be a
+   * record without unification; otherwise we throw an ambiguous field error.
+   * there is no way for regular Hindley-Milner to determine the type of a
+   * record without annotations; it would need to be extended with some kind of
+   * subtyping (i.e. to assert that some record has *at least* some field)
+   *)
+  | Field(r, name) -> 
+    let tr = infer st env r in
+    begin match tr with
+    | TyRec(tyfields) ->
+        begin match List.filter tyfields (fun tf -> tf.name = name) with
+        | []  -> type_error (FieldNotFound(tr, name))
+        | [t] -> t.tyname
+        | _   -> type_error (DuplicateField(tr, name))
+        end
+    | t -> type_error (FieldNotFound(t, name))
+    end
 
-  | Let(id, body) -> type_error (UnboundVar("implement_let_infer"))
+  | Let(x, v, body) ->
+    let get_id_type id expr =
+      match id with
+      | IdWithType(name, t) -> begin
+        let tv = infer st env v in
+        add_constraint st tv t;
+        t
+        end
+      | Id(name) -> infer st env expr
+    in
+    let tv    = get_id_type x v in
+    let sc    = generalize env tv in
+    let name  = name_of_id x in
+    let env'  = Map.add env name sc in
+    infer st env' body
 
-  | Match(e, cases) -> type_error (UnboundVar("implement_match_infer"))
+  | Match(e, cases) -> type_error (UnboundVar("lol"))
+    (*
+    let infer_case_body_type c =
+
+    in
+    let rec gen_body_constraints tbs =
+      match tbs with
+      | []          -> []
+      | [_]         -> []
+      | t1::t2::tl  ->
+        add_constraint st t1 t2;
+        gen_body_constraints (t2::tl)
+    in
+    let te  = infer st env e in
+    let tcs = List.map cases (fun c -> pat_infer st env c.match_pat) in
+    List.iter tcs (add_constraint st te);
+    let tbs = List.map cases infer_case_body_type in
+    *)
 
   | Cond(pred, thenExpr, elseExpr) ->
     let typred = infer st env pred in
@@ -239,7 +291,7 @@ let rec infer (st : infer_st) (env : tyenv) (e : expr) : tyname =
       | IdWithType(name, t) -> (name, t)
     in
     let (name, tvar)  = get_var_type var in
-    let tsvar         = generalize env tvar in
+    let tsvar         = ([], tvar) in
     let env'          = Map.add env name tsvar in
     let tbody         = infer st env' body in
     TyFunc(tvar, tbody)
@@ -250,6 +302,9 @@ let rec infer (st : infer_st) (env : tyenv) (e : expr) : tyname =
     let tout  = freshVar st in
     add_constraint st tf (TyFunc(targ, tout));
     tout
+
+and pat_infer (st : infer_st) (env : tyenv) (pat : pattern) : tyname =
+  type_error (UnboundVar("lol"))
 ;;
 
 let rec unify (s : subst) (t1 : tyname) (t2 : tyname) : subst =
@@ -262,7 +317,25 @@ let rec unify (s : subst) (t1 : tyname) (t2 : tyname) : subst =
 
   | (TyProd(p1), TyProd(p2)) -> unifyMany s p1 p2
 
-  | (TyRec(f1), TyRec(f2)) -> type_error (UnboundVar("unify_rec"))
+  | (TyRec(fs1), TyRec(fs2)) ->
+    let fs1' = List.sort field_compare fs1 in
+    let fs2' = List.sort field_compare fs2 in
+    begin match List.zip fs1' fs2' with
+    | Some(z) ->
+      let same_count =
+        List.filter z (fun (f1,f2) -> f1.name = f2.name) |> List.length
+      in
+      if same_count = List.length fs1' && same_count = List.length fs2'
+      then begin
+        let (fs1'', fs2'') =
+          List.map z (fun (f1,f2) -> (f1.tyname, f2.tyname)) |> List.unzip
+        in
+        unifyMany s fs1'' fs2''
+      end
+      else type_error (UnificationFail(t1,t2))
+
+    | None -> type_error (UnificationFail(t1,t2))
+    end
 
   | (TyCon(n1,a1), TyCon(n2,a2)) ->
     if n1 = n2
@@ -305,11 +378,32 @@ let rec solve (s : subst) (cons : constr list) : subst =
     solve (compose s1 s) (ConstrListSub.apply s1 cs)
 ;;
 
+let check_type' (e : expr) : (tyname * constr list, tyerror) Result.t =
+  try begin
+    let st : infer_st = { count=0; constraints=[] } in
+    let env : tyenv   = String.Map.empty in
+    let t             = infer st env e in
+    st.constraints    <- List.rev st.constraints;
+    let subst         = solve null_subst st.constraints in
+    let principal     = TynameSub.apply subst t in
+    Ok(principal, st.constraints)
+  end with
+  | TypecheckError(tyerr) -> Error(tyerr)
+;;
+
 let check_type (e : expr) : (tyname, tyerror) Result.t =
   try begin
     let st : infer_st = { count=0; constraints=[] } in
     let env : tyenv   = String.Map.empty in
     let t             = infer st env e in
+    (* reverse constraint list to make sure constraints are unified in the
+     * correct order; otherwise the principal type will not be computed
+     * properly
+     * e.g. consider the reverse of the following constraints:
+     * ((TyVar v0), (TyFunc (TyCon int ()) (TyVar v2)))
+     * ((TyVar v2), (TyFunc (TyCon int ()) (TyVar v3)))
+     *)
+    st.constraints    <- List.rev st.constraints;
     let subst         = solve null_subst st.constraints in
     let principal     = TynameSub.apply subst t in
     Ok(principal)

@@ -37,6 +37,7 @@
 %token THEN
 %token ELSE
 %token FUN
+%token IN
 %token EOF
 
 %nonassoc binding_prec
@@ -47,6 +48,14 @@
 %left     PERIOD
 
 %start <Ast.progdef list> prog
+
+%{
+let build_let args e =
+  match args with
+  | []    -> e
+  | _::_  -> List.fold (List.rev args) ~init:e ~f:(fun acc arg -> Func(arg, acc))
+;;
+%}
 
 %%
 
@@ -158,6 +167,7 @@ expr_id:
   | LPAREN; v = BINOP; RPAREN           { v }
   | LPAREN; v = expr_id; RPAREN         { v }
 
+
 expr:
   | v = INT                             { ILit(v) }
 
@@ -177,7 +187,19 @@ expr:
 
   | LBRAC; lst = field_list; RBRAC      { Rec(lst) }
 
-  | v = binding                         { v }
+  | LET; name = expr_id; args = arg_list; COLON; tyname = tyname; EQ; e = expr; IN; body = expr;
+    {
+      let v = build_let args e in
+      Let(IdWithType(name, tyname), v, body)
+    }
+    %prec binding_prec
+
+  | LET; name = expr_id; args = arg_list; EQ; e = expr; IN; body = expr
+    {
+      let v = build_let args e in
+      Let(Id(name), v, body)
+    }
+    %prec binding_prec
 
   | IF; pred = expr; THEN; then_expr = expr; ELSE; else_expr = expr
     { Cond(pred, then_expr, else_expr) }
@@ -198,9 +220,9 @@ expr:
 
   (* mult has to be a special case because STAR is a special token
    * that is also used by product types *)
-  | a1 = expr; op = STAR; a2 = expr    { App(App(Var("*"), a1), a2) }
+  | a1 = expr; op = STAR; a2 = expr     { App(App(Var("*"), a1), a2) }
 
-  | a1 = expr; op = EQ; a2 = expr    { App(App(Var("="), a1), a2) }
+  | a1 = expr; op = EQ; a2 = expr       { App(App(Var("="), a1), a2) }
 
   (* support infix binary operations *)
   | a1 = expr; op = BINOP; a2 = expr    { App(App(Var(op), a1), a2) } %prec app
@@ -211,7 +233,7 @@ binding:
     {
       let body = List.fold (List. rev args)
                   ~init:e ~f:(fun acc arg -> Func(arg, acc)) in
-      Let(IdWithType(name, tyname), body)
+      (IdWithType(name, tyname), body)
     }
     %prec binding_prec
 
@@ -219,7 +241,7 @@ binding:
     {
       let body = List.fold (List.rev args)
                   ~init:e ~f:(fun acc arg -> Func(arg, acc)) in
-      Let(Id(name), body)
+      (Id(name), body)
     }
     %prec binding_prec
 
@@ -251,7 +273,7 @@ prog:
   | EOF { [] }
 
   | hd = binding; SCOLON; SCOLON; tl = prog
-    { Expr(hd)::tl }
+    { Binding(fst hd, snd hd)::tl }
 
   | hd = tydef; SCOLON; SCOLON; tl = prog
     { Typedef(hd)::tl }
