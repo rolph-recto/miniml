@@ -187,6 +187,10 @@ expr:
 
   | LBRAC; lst = field_list; RBRAC      { Rec(lst) }
 
+  | name = CON; arg = expr              { Con(name, arg) }
+
+  | name = CON                          { ConEmpty(name) }
+
   | LET; name = expr_id; args = arg_list; COLON; tyname = tyname; EQ; e = expr; IN; body = expr;
     {
       let v = build_let args e in

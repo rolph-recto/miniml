@@ -7,7 +7,13 @@ open Ast
 module SSet = String.Set
 
 type tyscheme = (name list) * tyname
-type tyenv    = tyscheme String.Map.t
+
+type tyenv    = {
+  bindings: tyscheme String.Map.t;
+  tysyms: tyscheme String.Map.t;
+  tysums: (name * name list * tyname Option.t) String.Map.t
+}
+
 type subst    = tyname String.Map.t
 type constr   = (tyname * tyname)
 
@@ -16,13 +22,14 @@ type tyerror =
   | UnificationFails of (tyname list) * (tyname list)
   | InfiniteType of name * tyname
   | UnboundVar of name
+  | UnknownConstructor of name
   | FieldNotFound of tyname * name
   | DuplicateField of tyname * name
   [@@deriving sexp] ;;
 
-exception TypecheckError of tyerror
+exception TypeError of tyerror
 
-let type_error (err : tyerror) = raise (TypecheckError err)
+let type_error (err : tyerror) = raise (TypeError err)
 
 module type Sub = sig
   type t
@@ -128,6 +135,10 @@ module TynameListSub = ListSub(TynameSub)
 module TyschemeListSub = ListSub(TyschemeSub)
 module ConstrListSub = ListSub(ConstrSub)
 
+let add_binding (env : tyenv) (name : name) (sc : tyscheme) : tyenv =
+  { env with bindings = Map.add env.bindings name sc }
+;;
+
 (* sub functions *)
 let null_subst : subst = String.Map.empty
 
@@ -164,15 +175,19 @@ let freshVar (st : infer_st) : tyname =
   TyVar(name)
 ;;
 
-let instantiate (st : infer_st) (s : tyscheme) : tyname = 
+let instantiate' (st : infer_st) (s : tyscheme) : (tyname String.Map.t * tyname) = 
   let (fvs, t)  = s in
   let fvs'      = List.map ~f:(fresh st |> (fun n -> TyVar n) |> const) fvs in
   let sub       = List.zip_exn fvs fvs' |> String.Map.of_alist_exn  in
-  TynameSub.apply sub t
+  (sub, TynameSub.apply sub t)
+;;
+
+let instantiate (st : infer_st) (s : tyscheme) : tyname = 
+  let (_, t) = instantiate' st s in t
 ;;
 
 let generalize (env : tyenv) (t : tyname) : tyscheme =
-  let ftv_env = Map.data env |> TyschemeListSub.free_vars in
+  let ftv_env = Map.data env.bindings |> TyschemeListSub.free_vars in
   let ftv     = TynameSub.free_vars t in
   let tvs     = SSet.diff ftv ftv_env |> SSet.to_list in
   (tvs, t)
@@ -183,7 +198,7 @@ let generalize (env : tyenv) (t : tyname) : tyscheme =
  * instantiating fresh vars for a binding's type scheme at every call site
  *)
 let lookupEnv (st : infer_st) (env : tyenv) (x : name) : tyname = 
-  match Map.find env x with
+  match Map.find env.bindings x with
   | None    -> type_error (UnboundVar(x))
   | Some(t) -> let t' = instantiate st t in t'
 ;;
@@ -241,6 +256,32 @@ let rec infer (st : infer_st) (env : tyenv) (e : expr) : tyname =
     | t -> type_error (FieldNotFound(t, name))
     end
 
+  | Con(cons_name, con_arg) ->
+    begin match Map.find env.tysums cons_name with
+    | Some(ty_name, ty_args, Some(tcon)) ->
+      let (sub, tcon')  = instantiate' st (ty_args, tcon) in
+      let targ          = infer st env con_arg in
+      add_constraint st tcon' targ;
+      let ty_args'      = List.map ty_args (Map.find_exn sub) in
+      TyCon(ty_name, ty_args')
+
+    | Some(ty_name, ty_args, None) -> type_error (UnknownConstructor(cons_name))
+
+    | None -> type_error (UnknownConstructor(cons_name))
+    end
+
+  | ConEmpty(cons_name) ->
+    begin match Map.find env.tysums cons_name with
+    | Some(ty_name, ty_args, None) ->
+      (* instantiate type constructor args into fresh type vars *)
+      let ty_args' = List.map ~f:(fresh st |> (fun n -> TyVar n) |> const) ty_args in
+      TyCon(ty_name, ty_args')
+
+    | Some(_, _, Some(_)) -> type_error (UnknownConstructor(cons_name))
+
+    | None -> type_error (UnknownConstructor(cons_name))
+    end
+    
   | Let(x, v, body) ->
     let get_id_type id expr =
       match id with
@@ -254,7 +295,7 @@ let rec infer (st : infer_st) (env : tyenv) (e : expr) : tyname =
     let tv    = get_id_type x v in
     let sc    = generalize env tv in
     let name  = name_of_id x in
-    let env'  = Map.add env name sc in
+    let env'  = add_binding env name sc in
     infer st env' body
 
   | Match(e, cases) -> type_error (UnboundVar("lol"))
@@ -292,7 +333,7 @@ let rec infer (st : infer_st) (env : tyenv) (e : expr) : tyname =
     in
     let (name, tvar)  = get_var_type var in
     let tsvar         = ([], tvar) in
-    let env'          = Map.add env name tsvar in
+    let env'          = add_binding env name tsvar in
     let tbody         = infer st env' body in
     TyFunc(tvar, tbody)
 
@@ -378,24 +419,64 @@ let rec solve (s : subst) (cons : constr list) : subst =
     solve (compose s1 s) (ConstrListSub.apply s1 cs)
 ;;
 
-let check_type' (e : expr) : (tyname * constr list, tyerror) Result.t =
-  try begin
-    let st : infer_st = { count=0; constraints=[] } in
-    let env : tyenv   = String.Map.empty in
-    let t             = infer st env e in
-    st.constraints    <- List.rev st.constraints;
-    let subst         = solve null_subst st.constraints in
-    let principal     = TynameSub.apply subst t in
-    Ok(principal, st.constraints)
-  end with
-  | TypecheckError(tyerr) -> Error(tyerr)
-;;
+type prog_env = {
+  bindings: tyscheme String.Map.t;
+  tysyms: tyscheme String.Map.t
+}
 
-let check_type (e : expr) : (tyname, tyerror) Result.t =
+let check_type_prog (prog : progdef list) : (prog_env, tyerror) Result.t =
+  let st : infer_st = { count=0; constraints=[] } in
+  let init_env : tyenv   = {
+    bindings = String.Map.empty;
+    tysyms = String.Map.empty;
+    tysums = String.Map.empty
+  } in
+  let check_type_progdef st env progdef = 
+    begin match progdef with
+    | Binding(Id(name), expr) ->
+      (* TODO: add pass to replace all type synonyms with their definitions
+       * for all type annotations within the expr *)
+      let t         = infer st env expr in
+      let bindings' = String.Map.add env.bindings name ([], t) in
+      let env'      = { env with bindings = bindings' } in
+      env'
+
+    | Binding(IdWithType(name,tannot), expr) ->
+      (* TODO: add pass to replace all type synonyms with their definitions
+       * for all type annotations within the expr *)
+      let t         = infer st env expr in
+      let bindings' = String.Map.add env.bindings name ([], t) in
+      let env'      = { env with bindings = bindings' } in
+      add_constraint st tannot t;
+      env'
+
+    | Typedef(tydef) ->
+      begin match tydef with
+      | TyName(name, args, def) ->
+        let tysyms' = String.Map.add env.tysyms name (args, def) in
+        let env'    = { env with tysyms = tysyms' } in
+        env'
+
+      | TySum(name, args, cons) ->
+        let add_con ty_name args consmap con =
+          match con with
+          | ConDef(con_name, def) ->
+            String.Map.add consmap con_name (ty_name, args, Some(def))
+
+          | ConDefEmpty(con_name) ->
+            String.Map.add consmap con_name (ty_name, args, None)
+        in
+        let tysums' = List.fold cons ~init:env.tysums ~f:(add_con name args) in
+        let tyargs  = List.map args (fun arg -> TyVar(arg)) in
+        let env'    = { env with
+          tysyms    = Map.add env.tysyms name (args, (TyCon(name, tyargs)));
+          tysums    = tysums'
+        } in
+        env'
+      end
+    end
+  in
   try begin
-    let st : infer_st = { count=0; constraints=[] } in
-    let env : tyenv   = String.Map.empty in
-    let t             = infer st env e in
     (* reverse constraint list to make sure constraints are unified in the
      * correct order; otherwise the principal type will not be computed
      * properly
@@ -403,11 +484,15 @@ let check_type (e : expr) : (tyname, tyerror) Result.t =
      * ((TyVar v0), (TyFunc (TyCon int ()) (TyVar v2)))
      * ((TyVar v2), (TyFunc (TyCon int ()) (TyVar v3)))
      *)
+    let final_env     = List.fold prog ~init:init_env ~f:(check_type_progdef st) in
     st.constraints    <- List.rev st.constraints;
     let subst         = solve null_subst st.constraints in
-    let principal     = TynameSub.apply subst t in
-    Ok(principal)
+    let principal_env = {
+      bindings = Map.map final_env.bindings (TyschemeSub.apply subst);
+      tysyms = Map.map final_env.tysyms (TyschemeSub.apply subst)
+    } in
+    Ok(principal_env)
   end with
-  | TypecheckError(tyerr) -> Error(tyerr)
+  | TypeError(tyerr) -> Error(tyerr)
 ;;
 

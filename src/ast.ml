@@ -65,10 +65,8 @@ and expr =
   | Tuple of expr list (* list must be non-empty, otherwise it's a unit *)
   | Rec of field list
   | Field of expr * name
-  (* TODO:
-   * Add binding val to LET
-   * Add constructors for algebraic data types!
-   *)
+  | Con of name * expr
+  | ConEmpty of name
   | Let of id * expr * expr
   | Match of expr * case list
   | Cond of expr * expr * expr

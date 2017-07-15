@@ -11,22 +11,17 @@ let print_position outx lexbuf =
 
 let parse_with_error lexbuf =
   try begin
-    let get_type p =
-      match p with
-      | Typedef(_) -> (p, Error(UnboundVar("lol")))
-      | Binding(name, expr) -> (p, check_type' expr)
-    in
-    Miniml_parser.prog Miniml_lexer.read lexbuf |> List.map ~f:get_type
+    Miniml_parser.prog Miniml_lexer.read lexbuf |> check_type_prog
   end with
   | SyntaxError msg ->
     printf "%a: %s\n" print_position lexbuf msg;
-    []
+    Error(UnboundVar("lol"))
 
   | Miniml_parser.Error ->
     printf "%a: syntax error\n" print_position lexbuf;
-    []
+    Error(UnboundVar("lol"))
 
-let print_sexp sexp =  Sexp.to_string_hum sexp |> printf "%s\n\n"
+let print_sexp sexp =  Sexp.to_string_hum sexp |> printf "%s\n"
 
 let rec parse_and_print lexbuf =
   let print_constraints (c1, c2) = 
@@ -34,17 +29,19 @@ let rec parse_and_print lexbuf =
     let s2 = Ast.sexp_of_tyname c2 |> Sexp.to_string_hum in
     printf "(%s, %s)\n\n" s1 s2
   in
-  let print_ast_and_type (p, t) =
-    Ast.sexp_of_progdef p |> print_sexp;
-    match t with
-    | Ok(ty, constraints) ->
+  let print_env env =
+    let print_binding (name, (_,ty)) =
+      printf "%s: " name;
       Ast.sexp_of_tyname ty |> print_sexp;
-      printf "# of constraints: %d\n" (List.length constraints);
-      List.iter constraints print_constraints;
-
-    | Error(tyerr) -> Typecheck.sexp_of_tyerror tyerr |> print_sexp
-  in 
-  List.iter (parse_with_error lexbuf) ~f:print_ast_and_type
+    in
+    printf "Type synonyms:\n";
+    List.iter (Map.to_alist env.tysyms) print_binding;
+    printf "Bindings:\n";
+    List.iter (Map.to_alist env.bindings) print_binding
+  in
+  match parse_with_error lexbuf with
+  | Ok(env) -> print_env env
+  | Error(tyerr) -> Typecheck.sexp_of_tyerror tyerr |> print_sexp
 ;;
 
 let loop filename () =
