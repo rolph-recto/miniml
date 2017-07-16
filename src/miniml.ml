@@ -9,17 +9,24 @@ let print_position outx lexbuf =
   fprintf outx "%s:%d:%d" pos.pos_fname
     pos.pos_lnum (pos.pos_cnum - pos.pos_bol + 1)
 
+let default_errinfo = {
+  tyerror = UnboundVar("lol");
+  constraints = [];
+  env = empty_env;
+  progdefs = [];
+}
+
 let parse_with_error lexbuf =
   try begin
     Miniml_parser.prog Miniml_lexer.read lexbuf |> check_type_prog
   end with
   | SyntaxError msg ->
     printf "%a: %s\n" print_position lexbuf msg;
-    Error(UnboundVar("lol"))
+    Error(default_errinfo)
 
   | Miniml_parser.Error ->
     printf "%a: syntax error\n" print_position lexbuf;
-    Error(UnboundVar("lol"))
+    Error(default_errinfo)
 
 let print_sexp sexp =  Sexp.to_string_hum sexp |> printf "%s\n"
 
@@ -29,19 +36,42 @@ let rec parse_and_print lexbuf =
     let s2 = Ast.sexp_of_tyname c2 |> Sexp.to_string_hum in
     printf "(%s, %s)\n\n" s1 s2
   in
+  let print_binding (name, (_,ty)) =
+    printf "%s: " name;
+    Ast.sexp_of_tyname ty |> print_sexp;
+  in
+  let print_sum (name, (tyname, args, def)) =
+    let arglist = List.fold args ~init:"" ~f:(fun acc x -> acc ^ " " ^ x) in
+    match def with
+    | None ->
+      printf "%s -> %s %s\n" name arglist tyname
+    | Some(tydef) ->
+      let tydefstr = tydef |> Ast.sexp_of_tyname |> Sexp.to_string_hum in
+      printf "%s -> %s %s = %s\n" name arglist tyname tydefstr
+  in
   let print_env env =
-    let print_binding (name, (_,ty)) =
-      printf "%s: " name;
-      Ast.sexp_of_tyname ty |> print_sexp;
-    in
     printf "Type synonyms:\n";
     List.iter (Map.to_alist env.tysyms) print_binding;
     printf "Bindings:\n";
-    List.iter (Map.to_alist env.bindings) print_binding
+    List.iter (Map.to_alist env.bindings) print_binding;
+    printf "Constructors:\n";
+    List.iter (Map.to_alist env.tysums) print_sum;
   in
   match parse_with_error lexbuf with
-  | Ok(env) -> print_env env
-  | Error(tyerr) -> Typecheck.sexp_of_tyerror tyerr |> print_sexp
+  | Ok(tyinfo) ->
+    List.iter tyinfo.progdefs ~f:(fun pd -> print_sexp (Ast.sexp_of_progdef pd));
+    printf "constraints:\n";
+    List.iter tyinfo.constraints print_constraints;
+    print_env tyinfo.env;
+    printf "SUCCESS!\n";
+  | Error(errinfo) ->
+    List.iter errinfo.progdefs ~f:(fun pd -> print_sexp (Ast.sexp_of_progdef pd));
+    printf "error:\n";
+    Typecheck.sexp_of_tyerror errinfo.tyerror |> print_sexp;
+    printf "constraints:\n";
+    List.iter errinfo.constraints print_constraints;
+    print_env errinfo.env;
+    printf "ERROR!\n";
 ;;
 
 let loop filename () =

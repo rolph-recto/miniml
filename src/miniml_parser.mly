@@ -32,6 +32,8 @@
 %token EQ
 %token LBRAC
 %token RBRAC
+%token LSBRAC
+%token RSBRAC
 %token SCOLON
 %token IF
 %token THEN
@@ -69,35 +71,40 @@ tyfield_list:
 
   | v = tyfield                         { [v] }
 
-tyname: 
-  | args = tyname_list; tycon = ID      { TyCon(tycon, args) }
+tyname2:
+  | tycon = ID; LSBRAC; args = tyname_list; RSBRAC
+    { TyCon(tycon, args) }
 
-  | hd = tyname; STAR; tl = typrod_list { TyProd(hd::tl) }
+  | tycon = ID;                         { TyCon(tycon, []) }
 
   | LBRAC; fields = tyfield_list; RBRAC { TyRec(fields) }
 
   | v = TYVAR                           { TyVar(v) }
 
-  | t1 = tyname; RARROW; t2 = tyname    { TyFunc(t1, t2) }
+  | t1 = tyname2; RARROW; t2 = tyname2  { TyFunc(t1, t2) }
 
   | LPAREN; t = tyname; RPAREN          { t }
+
+tyname: 
+  | tl = typrod_list; STAR; hd = tyname2  { TyProd(tl@[hd]) }
+
+  | e = tyname2                           { e }
   ;
 
 tyname_list:
-  | tl = tyname_list; hd = tyname       { tl@[hd] }
-  | v = tyname                          { [v] }
-  | (* empty *)                         { [] }
+  | tl = tyname_list; COMMA; hd = tyname2       { tl@[hd] }
+  | v = tyname2                                 { [v] }
   ;
 
 typrod_list:
-  | tl = typrod_list; STAR; hd = tyname   { tl@[hd] }
-  | v = tyname                            { [v] }
+  | tl = typrod_list; STAR; hd = tyname2  { tl@[hd] }
+  | v = tyname2                           { [v] }
   ;
 
 tyvar_list:
-  | tl = tyvar_list; hd = TYVAR         { tl@[hd] }
+  | tl = tyvar_list; COMMA; hd = TYVAR    { tl@[hd] }
 
-  | (* empty *)                         { [] }
+  | v = TYVAR                             { [v] }
   ;
 
 tycon:
@@ -110,10 +117,16 @@ tycon_list:
   | tl = tycon_list; hd = tycon         { tl@[hd] }
 
 tydef:
-  | TYPE; args = tyvar_list; name = ID; EQ; cons = tycon_list
+  | TYPE; name = ID; EQ; cons = tycon_list
+    { TySum(name, [], cons) }
+
+  | TYPE; name = ID; LSBRAC; args = tyvar_list; RSBRAC; EQ; cons = tycon_list
     { TySum(name, args, cons) }
 
-  | TYPE; args = tyvar_list; name = ID; EQ; tyname = tyname
+  | TYPE; name = ID; EQ; tyname = tyname
+    { TyName(name, [], tyname) }
+
+  | TYPE; name = ID; LSBRAC; args = tyvar_list; RSBRAC; EQ; tyname = tyname
     { TyName(name, args, tyname) }
   ;
 
@@ -134,10 +147,9 @@ arg_list:
   ;
 
 pattern:
-  | name = CON; LPAREN; args = pat_list; RPAREN
-    { PatCon(name, args) }
+  | name = CON; arg = pattern           { PatCon(name, arg) }
 
-  | name = CON                          { PatCon(name, []) }
+  | name = CON                          { PatConEmpty(name) }
 
   | LPAREN; RPAREN                      { PatUnit }
 
@@ -154,6 +166,10 @@ pattern:
   | v = ID                              { PatVar(v) }
 
   | v = UNDERSCORE                      { PatWildcard }
+
+  | LPAREN; lst = pat_list; RPAREN      { PatTuple(lst) }
+
+  | LPAREN; v = pattern; RPAREN         { v }
   ;
 
 pat_list:

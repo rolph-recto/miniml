@@ -42,7 +42,8 @@ let name_of_id (id : id) : name =
 ;;
 
 type pattern = 
-  | PatCon of string * pattern list
+  | PatCon of name * pattern 
+  | PatConEmpty of name
   | PatTuple of pattern list
   | PatUnit
   | PatILit of int

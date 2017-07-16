@@ -71,6 +71,10 @@ rule read =
 
   | '}'                     { RBRAC }
 
+  | '['                     { LSBRAC }
+
+  | ']'                     { RSBRAC }
+
   | ';'                     { SCOLON }
 
   | "if"                    { IF }

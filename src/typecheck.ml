@@ -14,22 +14,29 @@ type tyenv    = {
   tysums: (name * name list * tyname Option.t) String.Map.t
 }
 
+let empty_env = {
+  bindings = String.Map.empty;
+  tysyms = String.Map.empty;
+  tysums = String.Map.empty
+}
+
 type subst    = tyname String.Map.t
 type constr   = (tyname * tyname)
 
 type tyerror =
   | UnificationFail of tyname * tyname
-  | UnificationFails of (tyname list) * (tyname list)
-  | InfiniteType of name * tyname
-  | UnboundVar of name
-  | UnknownConstructor of name
-  | FieldNotFound of tyname * name
-  | DuplicateField of tyname * name
+  | UnificationFails of (tyname list) * (tyname list) 
+  | InfiniteType of name * tyname 
+  | UnboundVar of name 
+  | UnknownConstructor of name 
+  | FieldNotFound of tyname * name 
+  | DuplicateField of tyname * name 
+  | UnknownTypeVar of name list * tydef
   [@@deriving sexp] ;;
 
-exception TypeError of tyerror
+exception TypeError of tyenv * tyerror
 
-let type_error (err : tyerror) = raise (TypeError err)
+let type_error (env : tyenv) (err : tyerror) = raise (TypeError(env, err))
 
 module type Sub = sig
   type t
@@ -148,6 +155,12 @@ let prefer_left ~key = function
   | `Right(y)   -> Some(y)
 ;;
 
+let prefer_right ~key = function
+  | `Both(x,y)  -> Some(y)
+  | `Left(x)    -> Some(x)
+  | `Right(y)   -> Some(y)
+;;
+
 let compose (s1 : subst) (s2 : subst) : subst = 
   let s2' = Map.map ~f:(TynameSub.apply s1) s2 in
   Map.merge s2' s1 prefer_left
@@ -177,8 +190,9 @@ let freshVar (st : infer_st) : tyname =
 
 let instantiate' (st : infer_st) (s : tyscheme) : (tyname String.Map.t * tyname) = 
   let (fvs, t)  = s in
-  let fvs'      = List.map ~f:(fresh st |> (fun n -> TyVar n) |> const) fvs in
+  let fvs'      = List.map ~f:(fun x -> TyVar (fresh st)) fvs in
   let sub       = List.zip_exn fvs fvs' |> String.Map.of_alist_exn  in
+  (* printf "inst: %s\n" (List.fold fvs'  *)
   (sub, TynameSub.apply sub t)
 ;;
 
@@ -199,7 +213,7 @@ let generalize (env : tyenv) (t : tyname) : tyscheme =
  *)
 let lookupEnv (st : infer_st) (env : tyenv) (x : name) : tyname = 
   match Map.find env.bindings x with
-  | None    -> type_error (UnboundVar(x))
+  | None    -> type_error env (UnboundVar(x)) 
   | Some(t) -> let t' = instantiate st t in t'
 ;;
 
@@ -249,11 +263,11 @@ let rec infer (st : infer_st) (env : tyenv) (e : expr) : tyname =
     begin match tr with
     | TyRec(tyfields) ->
         begin match List.filter tyfields (fun tf -> tf.name = name) with
-        | []  -> type_error (FieldNotFound(tr, name))
+        | []  -> type_error env (FieldNotFound(tr, name)) 
         | [t] -> t.tyname
-        | _   -> type_error (DuplicateField(tr, name))
+        | _   -> type_error env (DuplicateField(tr, name)) 
         end
-    | t -> type_error (FieldNotFound(t, name))
+    | t -> type_error env (FieldNotFound(t, name)) 
     end
 
   | Con(cons_name, con_arg) ->
@@ -261,25 +275,27 @@ let rec infer (st : infer_st) (env : tyenv) (e : expr) : tyname =
     | Some(ty_name, ty_args, Some(tcon)) ->
       let (sub, tcon')  = instantiate' st (ty_args, tcon) in
       let targ          = infer st env con_arg in
-      add_constraint st tcon' targ;
       let ty_args'      = List.map ty_args (Map.find_exn sub) in
+      add_constraint st tcon' targ;
       TyCon(ty_name, ty_args')
 
-    | Some(ty_name, ty_args, None) -> type_error (UnknownConstructor(cons_name))
+    | Some(ty_name, ty_args, None) ->
+      type_error env (UnknownConstructor(cons_name)) 
 
-    | None -> type_error (UnknownConstructor(cons_name))
+    | None ->
+      type_error env (UnknownConstructor(cons_name)) 
     end
 
   | ConEmpty(cons_name) ->
     begin match Map.find env.tysums cons_name with
     | Some(ty_name, ty_args, None) ->
       (* instantiate type constructor args into fresh type vars *)
-      let ty_args' = List.map ~f:(fresh st |> (fun n -> TyVar n) |> const) ty_args in
+      let ty_args' = List.map ~f:(fun x -> TyVar (fresh st)) ty_args in
       TyCon(ty_name, ty_args')
 
-    | Some(_, _, Some(_)) -> type_error (UnknownConstructor(cons_name))
+    | Some(_, _, Some(_)) -> type_error env (UnknownConstructor(cons_name)) 
 
-    | None -> type_error (UnknownConstructor(cons_name))
+    | None -> type_error env (UnknownConstructor(cons_name)) 
     end
     
   | Let(x, v, body) ->
@@ -298,24 +314,28 @@ let rec infer (st : infer_st) (env : tyenv) (e : expr) : tyname =
     let env'  = add_binding env name sc in
     infer st env' body
 
-  | Match(e, cases) -> type_error (UnboundVar("lol"))
-    (*
-    let infer_case_body_type c =
-
+  | Match(e, cases) ->
+    let rec gen_list_constraints tbs =
+      begin match tbs with
+      | []            -> []
+      | [_]           -> []
+      | t1::t2::tl    ->
+        let tl = gen_list_constraints (t2::tl) in
+        (t1,t2)::tl
+      end
     in
-    let rec gen_body_constraints tbs =
-      match tbs with
-      | []          -> []
-      | [_]         -> []
-      | t1::t2::tl  ->
-        add_constraint st t1 t2;
-        gen_body_constraints (t2::tl)
+    let (tcs, cenvs) =
+      List.map cases (fun c -> pat_infer st env c.match_pat) |> List.unzip
     in
-    let te  = infer st env e in
-    let tcs = List.map cases (fun c -> pat_infer st env c.match_pat) in
-    List.iter tcs (add_constraint st te);
-    let tbs = List.map cases infer_case_body_type in
-    *)
+    let te    = infer st env e in
+    let bs    = List.map cases (fun c -> c.body) in
+    let benvs = List.zip_exn bs cenvs in
+    let tbs   = List.map benvs (fun (body, benv) -> infer st benv body) in
+    let bcs   = gen_list_constraints tbs in
+    let ccs   = gen_list_constraints (te::tcs) in
+    List.iter ccs (fun (t1, t2) -> add_constraint st t1 t2);
+    List.iter bcs (fun (t1, t2) -> add_constraint st t1 t2);
+    List.hd_exn tbs
 
   | Cond(pred, thenExpr, elseExpr) ->
     let typred = infer st env pred in
@@ -344,19 +364,75 @@ let rec infer (st : infer_st) (env : tyenv) (e : expr) : tyname =
     add_constraint st tf (TyFunc(targ, tout));
     tout
 
-and pat_infer (st : infer_st) (env : tyenv) (pat : pattern) : tyname =
-  type_error (UnboundVar("lol"))
+and pat_infer (st : infer_st) (env : tyenv) (pat : pattern) : tyname * tyenv =
+  match pat with
+  | PatUnit     -> (type_unit, env)
+
+  | PatILit(_)  -> (type_int, env)
+
+  | PatFLit(_)  -> (type_float, env)
+
+  | PatSLit(_)  -> (type_string, env)
+
+  | PatBLit(_)  -> (type_bool, env)
+
+  | PatVar(v)   ->
+    let t     = fresh st in
+    let sc    = generalize env (TyVar(t)) in
+    let env'  = add_binding env v sc in
+    (TyVar(t), env')
+    
+  (* basically the same as a variable, but don't add any bindings to the
+   * environment *)
+  | PatWildcard ->
+    let t = fresh st in (TyVar(t), env)
+
+  | PatConEmpty(name) -> 
+    begin match Map.find env.tysums name with
+    | None -> type_error env (UnknownConstructor(name))
+    | Some(ty_name, ty_args, Some(_)) -> type_error env (UnknownConstructor(name))
+    | Some(ty_name, ty_args, None) -> 
+      let ty_args'  = List.map ~f:(fun x -> TyVar (fresh st)) ty_args in
+      let t         = TyCon(ty_name, ty_args') in
+      (t, env)
+    end
+
+  | PatCon(name, arg) -> 
+    begin match Map.find env.tysums name with
+    | None -> type_error env (UnknownConstructor(name))
+    | Some(ty_name, ty_args, None) -> type_error env (UnknownConstructor(name))
+    | Some(ty_name, ty_args, Some(tcon)) ->
+      let (sub, tcon')  = instantiate' st (ty_args, tcon) in
+      let (targ, env')  = pat_infer st env arg in
+      let ty_args'      = List.map ty_args (Map.find_exn sub) in
+      let t             = TyCon(ty_name, ty_args') in
+      add_constraint st tcon' targ;
+      (t, env')
+    end
+
+  | PatTuple(args) ->
+    let (targs, aenvs) =
+      List.map args (fun arg -> pat_infer st env arg) |> List.unzip
+    in
+    let merge_bindings acc aenv =
+      Map.merge acc aenv.bindings ~f:prefer_right
+    in
+    let env' = { env with
+      bindings = List.fold aenvs ~init:env.bindings ~f:merge_bindings
+    } in
+    let t     = TyProd(targs) in
+    (t, env')
 ;;
 
-let rec unify (s : subst) (t1 : tyname) (t2 : tyname) : subst =
+let rec unify (env : tyenv) (s : subst) (t1 : tyname) (t2 : tyname) : subst =
   match (t1, t2) with
-  | (TyVar(v), t) -> bind s v t
+  | (TyVar(v), t) -> bind env s v t
 
-  | (t, TyVar(v)) -> bind s v t
+  | (t, TyVar(v)) -> bind env s v t
 
-  | (TyFunc(f1,a1), TyFunc(f2,a2)) -> unifyMany s [f1;a1] [f2;a2]
+  | (TyFunc(f1,a1), TyFunc(f2,a2)) -> unifyMany env s [f1;a1] [f2;a2]
 
-  | (TyProd(p1), TyProd(p2)) -> unifyMany s p1 p2
+  | (TyProd(p1), TyProd(p2)) -> unifyMany env s p1 p2
 
   | (TyRec(fs1), TyRec(fs2)) ->
     let fs1' = List.sort field_compare fs1 in
@@ -371,66 +447,73 @@ let rec unify (s : subst) (t1 : tyname) (t2 : tyname) : subst =
         let (fs1'', fs2'') =
           List.map z (fun (f1,f2) -> (f1.tyname, f2.tyname)) |> List.unzip
         in
-        unifyMany s fs1'' fs2''
+        unifyMany env s fs1'' fs2''
       end
-      else type_error (UnificationFail(t1,t2))
+      else type_error env (UnificationFail(t1,t2)) 
 
-    | None -> type_error (UnificationFail(t1,t2))
+    | None -> type_error env (UnificationFail(t1,t2)) 
     end
 
   | (TyCon(n1,a1), TyCon(n2,a2)) ->
     if n1 = n2
-    then unifyMany s a1 a2
-    else type_error (UnificationFail(t1,t2))
+    then unifyMany env s a1 a2
+    else type_error env (UnificationFail(t1,t2)) 
 
   | _ ->
     if t1 = t2
     then null_subst
-    else type_error (UnificationFail(t1,t2))
+    else type_error env (UnificationFail(t1,t2)) 
 
-and bind (s : subst) (n : name) (t : tyname) : subst =
+and bind (env : tyenv) (s : subst) (n : name) (t : tyname) : subst =
   match t with
-  | TyVar(_)  -> s
+  | TyVar(n') ->
+    begin match Map.find s n' with
+    | Some(t')  -> Map.add s n t'
+    | None      -> s
+    end
 
   | _ -> 
     if occurs_check n t
-    then type_error (InfiniteType(n,t))
+    then type_error env (InfiniteType(n,t)) 
     else Map.merge (String.Map.singleton n t) s prefer_left 
 
-and unifyMany (s : subst) (l1 : tyname list) (l2 : tyname list) : subst =
+and unifyMany (env : tyenv) (s : subst) (l1 : tyname list) (l2 : tyname list) : subst =
   match (l1, l2) with
   | ([], []) -> null_subst
 
   | (t1::ts1, t2::ts2)  ->
-    let s1    = unify s t1 t2 in
+    let s1    = unify env s t1 t2 in
     let ts1'  = TynameListSub.apply s1 ts1 in
     let ts2'  = TynameListSub.apply s1 ts2 in
-    let s2    = unifyMany s1 ts1' ts2' in
+    let s2    = unifyMany env s1 ts1' ts2' in
     compose s2 s1
 
-  | _  -> type_error (UnificationFails(l1,l2))
+  | _  -> type_error env (UnificationFails(l1,l2)) 
 ;;
 
-let rec solve (s : subst) (cons : constr list) : subst =
+let rec solve (env : tyenv) (s : subst) (cons : constr list) : subst =
   match cons with
   | [] -> s
   | (t1, t2)::cs ->
-    let s1 = unify s t1 t2 in
-    solve (compose s1 s) (ConstrListSub.apply s1 cs)
+    let s1 = unify env s t1 t2 in
+    solve env (compose s1 s) (ConstrListSub.apply s1 cs)
 ;;
 
-type prog_env = {
-  bindings: tyscheme String.Map.t;
-  tysyms: tyscheme String.Map.t
+type tycheck_info = {
+  env: tyenv;
+  constraints: constr list;
+  progdefs: progdef list;
 }
 
-let check_type_prog (prog : progdef list) : (prog_env, tyerror) Result.t =
+type error_info = {
+  tyerror: tyerror;
+  env: tyenv;
+  constraints: constr list;
+  progdefs: progdef list;
+}
+
+let check_type_prog (prog : progdef list) : (tycheck_info, error_info) Result.t =
   let st : infer_st = { count=0; constraints=[] } in
-  let init_env : tyenv   = {
-    bindings = String.Map.empty;
-    tysyms = String.Map.empty;
-    tysums = String.Map.empty
-  } in
   let check_type_progdef st env progdef = 
     begin match progdef with
     | Binding(Id(name), expr) ->
@@ -453,9 +536,13 @@ let check_type_prog (prog : progdef list) : (prog_env, tyerror) Result.t =
     | Typedef(tydef) ->
       begin match tydef with
       | TyName(name, args, def) ->
-        let tysyms' = String.Map.add env.tysyms name (args, def) in
-        let env'    = { env with tysyms = tysyms' } in
-        env'
+        let fvs = TyschemeSub.free_vars (args, def) in
+        if SSet.is_empty fvs
+        then
+          let tysyms' = String.Map.add env.tysyms name (args, def) in
+          let env'    = { env with tysyms = tysyms' } in
+          env'
+        else type_error env (UnknownTypeVar(SSet.to_list fvs, tydef))
 
       | TySum(name, args, cons) ->
         let add_con ty_name args consmap con =
@@ -466,13 +553,23 @@ let check_type_prog (prog : progdef list) : (prog_env, tyerror) Result.t =
           | ConDefEmpty(con_name) ->
             String.Map.add consmap con_name (ty_name, args, None)
         in
-        let tysums' = List.fold cons ~init:env.tysums ~f:(add_con name args) in
-        let tyargs  = List.map args (fun arg -> TyVar(arg)) in
-        let env'    = { env with
-          tysyms    = Map.add env.tysyms name (args, (TyCon(name, tyargs)));
-          tysums    = tysums'
-        } in
-        env'
+        let con_fvs fvs t =
+          match t with
+          | ConDef(_, def) ->
+            SSet.union (TyschemeSub.free_vars (args, def)) fvs
+          | ConDefEmpty(_) -> fvs
+        in 
+        let fvs       = List.fold cons ~init:SSet.empty ~f:con_fvs in
+        if SSet.is_empty fvs
+        then 
+          let tysums' = List.fold cons ~init:env.tysums ~f:(add_con name args) in
+          let tyargs  = List.map args (fun arg -> TyVar(arg)) in
+          let env'    = { env with
+            tysyms    = Map.add env.tysyms name (args, (TyCon(name, tyargs)));
+            tysums    = tysums'
+          } in
+          env'
+        else type_error env (UnknownTypeVar(SSet.to_list fvs, tydef))
       end
     end
   in
@@ -484,15 +581,27 @@ let check_type_prog (prog : progdef list) : (prog_env, tyerror) Result.t =
      * ((TyVar v0), (TyFunc (TyCon int ()) (TyVar v2)))
      * ((TyVar v2), (TyFunc (TyCon int ()) (TyVar v3)))
      *)
-    let final_env     = List.fold prog ~init:init_env ~f:(check_type_progdef st) in
+    let final_env     = List.fold prog ~init:empty_env ~f:(check_type_progdef st) in
     st.constraints    <- List.rev st.constraints;
-    let subst         = solve null_subst st.constraints in
-    let principal_env = {
+    let subst         = solve final_env null_subst st.constraints in
+    let principal_env = { final_env with
       bindings = Map.map final_env.bindings (TyschemeSub.apply subst);
-      tysyms = Map.map final_env.tysyms (TyschemeSub.apply subst)
+      tysyms = Map.map final_env.tysyms (TyschemeSub.apply subst);
     } in
-    Ok(principal_env)
+    let res = {
+      env = principal_env;
+      constraints = st.constraints;
+      progdefs = prog;
+    } in
+    Ok(res) 
   end with
-  | TypeError(tyerr) -> Error(tyerr)
+  | TypeError(env, tyerr) ->
+    let info = {
+      tyerror = tyerr;
+      env = env;
+      constraints = st.constraints;
+      progdefs = prog;
+    } in
+    Error(info)
 ;;
 
