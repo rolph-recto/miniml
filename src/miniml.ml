@@ -62,6 +62,7 @@ let rec parse_and_print lexbuf =
     List.iter tyinfo.progdefs ~f:(fun pd -> print_sexp (Ast.sexp_of_progdef pd));
     printf "constraints:\n";
     List.iter tyinfo.constraints print_constraints;
+    tyinfo.subst |> Typecheck.string_of_subst |> printf "subst: %s\n";
     print_env tyinfo.env;
     printf "SUCCESS!\n";
   | Error(errinfo) ->

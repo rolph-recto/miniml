@@ -24,7 +24,7 @@ let test_parse fail_msg prog expected =
       then true
       else begin
         printf "\nParsed:\n%s\n\nExpected:\n%s"
-          (Sexp.to_string ast_prog) (Sexp.to_string ast_expected);
+          (Sexp.to_string_hum ast_prog) (Sexp.to_string_hum ast_expected);
         false
       end
     | None -> false
@@ -33,8 +33,8 @@ let test_parse fail_msg prog expected =
 
 let parse_test1 ctx =
   let prog = "
-    type 'a list =
-      | Cons of ('a * ('a list)) -> 'a -> 'a
+    type list['a] =
+      | Cons of ('a * (list['a])) -> 'a -> 'a
       | Nil
     ;;"
   in
@@ -50,19 +50,19 @@ let parse_test1 ctx =
 
 let parse_test2 ctx =
   let prog = "
-    let f (lst : 'a list) =
+    let f (lst : list['a]) =
       match lst with
       | Cons(hd, _) -> hd + (f tl)
       | Nil -> 0
     ;;"
   in
   let expected = "
-    (Binding (Id f)
-      (Func (IdWithType lst (TyCon list ((TyVar 'a))))
-       (Match (Var lst)
-        (((match_pat (PatCon Cons ((PatVar hd) (PatVar _))))
-          (body (App (App (Var +) (Var hd)) (App (Var f) (Var tl)))))
-         ((match_pat (PatCon Nil ())) (body (ILit 0)))))))"
+	(Binding (Id f)
+	 (Func (IdWithType lst (TyCon list ((TyVar 'a))))                                           
+		(Match (Var lst)                       
+		 (((match_pat (PatCon Cons (PatTuple ((PatVar hd) PatWildcard))))
+			 (body (App (App (Var +) (Var hd)) (App (Var f) (Var tl)))))
+			((match_pat (PatConEmpty Nil)) (body (ILit 0)))))))"
   in
   test_parse "test 2 failed!" prog expected
 
@@ -123,6 +123,8 @@ let parse_test7 ctx =
   in
   test_parse "test 7 failed!" prog expected
 
+(* typechecker tests *)
+
 let suite =
   "parser" >::: [
     "parse_test1" >:: parse_test1;
@@ -132,7 +134,7 @@ let suite =
     "parse_test5" >:: parse_test5;
     "parse_test6" >:: parse_test6;
     "parse_test7" >:: parse_test7;
-  ]
+  ];
 ;;
 
 let () =

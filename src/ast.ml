@@ -73,6 +73,7 @@ and expr =
   | Cond of expr * expr * expr
   | Func of id * expr
   | App of expr * expr
+  | Fix of expr
   [@@deriving sexp]
 
 type progdef =

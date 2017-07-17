@@ -22,6 +22,7 @@ let id         = ['a'-'z' '_'] ['a'-'z' 'A'-'Z' '0'-'9' '_']*
 let con        = ['A'-'Z'] ['a'-'z' 'A'-'Z' '0'-'9' '_']*
 let tyvar      = ''' ['a'-'z']+
 let binop      = ['<' '>' '=' '?' '@' '#' '$' '%' '^' '~' '&' '+' '/' '|' '.' '-']+
+let underscore = '_'
 
 rule read =
   parse
@@ -30,6 +31,8 @@ rule read =
   | newline                 { next_line lexbuf; read lexbuf }
 
   | '"'                     { read_string (Buffer.create 17) lexbuf }
+
+  | underscore              { UNDERSCORE }
 
   | "true"                  { TRUE }
 
@@ -86,6 +89,8 @@ rule read =
   | "fun"                   { FUN }
 
   | "in"                    { IN }
+  
+  | "rec"                   { REC }
 
   | int_lit                 { INT (int_of_string (Lexing.lexeme lexbuf)) }
 
@@ -96,8 +101,6 @@ rule read =
   | con                     { CON (Lexing.lexeme lexbuf) }
 
   | tyvar                   { TYVAR (Lexing.lexeme lexbuf) }
-
-  | '_'                     { UNDERSCORE }
 
   (* binop should be the last regex because it's incredibly general *)
   | binop                   { BINOP (Lexing.lexeme lexbuf) }

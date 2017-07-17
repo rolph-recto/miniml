@@ -40,6 +40,7 @@
 %token ELSE
 %token FUN
 %token IN
+%token REC
 %token EOF
 
 %nonassoc binding_prec
@@ -163,9 +164,9 @@ pattern:
 
   | v = FALSE                           { PatBLit(false) }
 
-  | v = ID                              { PatVar(v) }
-
   | v = UNDERSCORE                      { PatWildcard }
+
+  | v = ID                              { PatVar(v) }
 
   | LPAREN; lst = pat_list; RPAREN      { PatTuple(lst) }
 
@@ -180,7 +181,7 @@ pat_list:
 
 expr_id:
   | v = ID                              { v }
-  | LPAREN; v = BINOP; RPAREN           { v }
+  | LPAREN; v = ID; RPAREN              { v }
   | LPAREN; v = expr_id; RPAREN         { v }
 
 
@@ -257,11 +258,29 @@ binding:
     }
     %prec binding_prec
 
+  | LET; REC; name = expr_id; args = arg_list; COLON; tyname = tyname; EQ; e = expr
+    {
+      let body = List.fold (List. rev args)
+                  ~init:e ~f:(fun acc arg -> Func(arg, acc)) in
+      let var = IdWithType(name, tyname) in
+      (var, Fix(Func(Id(name), body)))
+    }
+    %prec binding_prec
+
   | LET; name = expr_id; args = arg_list; EQ; e = expr
     {
       let body = List.fold (List.rev args)
                   ~init:e ~f:(fun acc arg -> Func(arg, acc)) in
       (Id(name), body)
+    }
+    %prec binding_prec
+
+  | LET; REC; name = expr_id; args = arg_list; EQ; e = expr
+    {
+      let body = List.fold (List.rev args)
+                  ~init:e ~f:(fun acc arg -> Func(arg, acc)) in
+      let var = Id(name) in
+      (var, Fix(Func(var, body)))
     }
     %prec binding_prec
 
