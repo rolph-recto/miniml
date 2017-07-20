@@ -211,7 +211,6 @@ let instantiate' (st : infer_st) (s : tyscheme) : (tyname String.Map.t * tyname)
   let (fvs, t)  = s in
   let fvs'      = List.map ~f:(fun x -> fresh_var st) fvs in
   let sub       = List.zip_exn fvs fvs' |> String.Map.of_alist_exn  in
-  (* printf "inst: %s\n" (List.fold fvs'  *)
   (sub, TynameSub.apply sub t)
 ;;
 
@@ -346,9 +345,6 @@ let rec infer (st : infer_st) (env : tyenv) (e : expr) : tyname =
     let (tcs, cenvs) =
       List.map cases (fun c -> pat_infer st env c.match_pat) |> List.unzip
     in
-    List.iter cenvs begin fun cenv ->
-      string_of_bindings cenv.bindings |> printf "match infer: %s\n"
-    end;
     let te    = infer st env e in
     let bs    = List.map cases (fun c -> c.body) in
     let benvs = List.zip_exn cenvs bs in

@@ -47,7 +47,7 @@
 %right    RARROW
 %left     STAR
 %left     BINOP
-%right    app
+%left    app
 %left     PERIOD
 
 %start <Ast.progdef list> prog

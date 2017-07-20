@@ -4,33 +4,48 @@ open Lexing
 open Ast
 open Typecheck
 
-let print_position outx lexbuf =
+let print_position lexbuf =
   let pos = lexbuf.lex_curr_p in
-  fprintf outx "%s:%d:%d" pos.pos_fname
+  sprintf "%s:%d:%d" pos.pos_fname
     pos.pos_lnum (pos.pos_cnum - pos.pos_bol + 1)
-
-let default_errinfo = {
-  tyerror = UnboundVar("lol");
-  constraints = [];
-  env = empty_env;
-  progdefs = [];
-}
 
 let parse_with_error lexbuf =
   try begin
-    Miniml_parser.prog Miniml_lexer.read lexbuf |> check_type_prog
+    Miniml_parser.prog Miniml_lexer.read lexbuf
   end with
   | SyntaxError msg ->
-    printf "%a: %s\n" print_position lexbuf msg;
-    Error(default_errinfo)
+    sprintf "%s: %s\n" (print_position lexbuf) msg |> failwith
 
   | Miniml_parser.Error ->
-    printf "%a: syntax error\n" print_position lexbuf;
-    Error(default_errinfo)
+    print_position lexbuf |> sprintf "%s: syntax error\n" |> failwith
+;;
 
 let print_sexp sexp =  Sexp.to_string_hum sexp |> printf "%s\n"
 
-let rec parse_and_print lexbuf =
+let get_lexbuf action filename () = 
+  try begin 
+    In_channel.with_file filename ~f:(fun inx ->
+      let lexbuf = Lexing.from_channel inx in
+      lexbuf.lex_curr_p <- { lexbuf.lex_curr_p with pos_fname = filename };
+      protect ~f:(action lexbuf) ~finally:(fun () -> In_channel.close inx))
+  end with
+  | Failure(msg) -> printf "%s\n" msg
+  | Sys_error(msg) -> printf "%s\n" msg
+;;
+
+let progdef_to_string p = p |> Ast.sexp_of_progdef |> Sexp.to_string_hum
+
+let parse =
+  let run_parse lexbuf () =
+    parse_with_error lexbuf
+    |> List.iter ~f:(fun p -> p |> progdef_to_string |> printf "%s\n")
+  in
+  Command.basic ~summary:"parse a miniml program"
+    Command.Spec.(empty +> anon ("filename" %: file))
+    (get_lexbuf run_parse)
+;;
+
+let typecheck =
   let print_constraints (c1, c2) = 
     let s1 = Ast.sexp_of_tyname c1 |> Sexp.to_string_hum in
     let s2 = Ast.sexp_of_tyname c2 |> Sexp.to_string_hum in
@@ -52,55 +67,48 @@ let rec parse_and_print lexbuf =
   let print_env env =
     printf "Type synonyms:\n";
     List.iter (Map.to_alist env.tysyms) print_binding;
-    printf "Bindings:\n";
-    List.iter (Map.to_alist env.bindings) print_binding;
-    printf "Constructors:\n";
+    printf "\nConstructors:\n";
     List.iter (Map.to_alist env.tysums) print_sum;
+    printf "\nBindings:\n";
+    List.iter (Map.to_alist env.bindings) print_binding;
   in
-  match parse_with_error lexbuf with
-  | Ok(tyinfo) ->
-    List.iter tyinfo.progdefs ~f:(fun pd -> print_sexp (Ast.sexp_of_progdef pd));
-    printf "constraints:\n";
-    List.iter tyinfo.constraints print_constraints;
-    tyinfo.subst |> Typecheck.string_of_subst |> printf "subst: %s\n";
-    print_env tyinfo.env;
-    printf "SUCCESS!\n";
-  | Error(errinfo) ->
-    List.iter errinfo.progdefs ~f:(fun pd -> print_sexp (Ast.sexp_of_progdef pd));
-    printf "error:\n";
-    Typecheck.sexp_of_tyerror errinfo.tyerror |> print_sexp;
-    printf "constraints:\n";
-    List.iter errinfo.constraints print_constraints;
-    print_env errinfo.env;
-    printf "ERROR!\n";
+  let run_typecheck e c lexbuf () =
+    match parse_with_error lexbuf |> check_type_prog with
+    | Ok(tyinfo) ->
+      if e then begin
+        tyinfo.subst |> Typecheck.string_of_subst |> printf "subst: %s\n"
+      end;
+      if c then begin
+        printf "\nconstraints:\n";
+        List.iter tyinfo.constraints print_constraints;
+      end;
+      print_env tyinfo.env;
+      printf "\nSUCCESS!\n";
+
+    | Error(errinfo) ->
+      if e then print_env errinfo.env else ();
+      if c
+      then begin
+        printf "\nconstraints:\n";
+        List.iter errinfo.constraints print_constraints;
+      end
+      else ();
+      Typecheck.sexp_of_tyerror errinfo.tyerror |> print_sexp;
+      printf "\nERROR!\n"
+  in
+  Command.basic ~summary:"typecheck a miniml program"
+    Command.Spec.(
+      empty
+      +> flag "-e" no_arg ~doc:" print environment"
+      +> flag "-c" no_arg ~doc:" print constraints"
+      +> anon ("filename" %: file))
+    (fun e c -> get_lexbuf (run_typecheck e c))
 ;;
 
-let loop filename () =
-  let inx = In_channel.create filename in
-  let lexbuf = Lexing.from_channel inx in
-  lexbuf.lex_curr_p <- { lexbuf.lex_curr_p with pos_fname = filename };
-  parse_and_print lexbuf;
-  In_channel.close inx
-
-(*
-let rec loop () =
-  let instr = input_line stdin in
-  let lexbuf = Lexing.from_string instr in
-  lexbuf.lex_curr_p <- { lexbuf.lex_curr_p with pos_fname = "(stdin)" };
-  parse_and_print lexbuf
-*)
-
-(* part 2 *)
-(*
 let () =
-  Command.basic ~summary:"Parse miniml files"
-    Command.Spec.(empty)
-    loop 
-  |> Command.run
-*)
-
-let () =
-  Command.basic ~summary:"Parse and display MiniML programs"
-    Command.Spec.(empty +> anon ("filename" %: file))
-    loop 
-  |> Command.run
+  let command =
+    Command.group ~summary:"compiler for miniml"
+      [ "parse", parse; "typecheck", typecheck ]
+  in
+  Command.run command
+;;
