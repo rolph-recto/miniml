@@ -17,6 +17,15 @@ Executable "miniml"
     sexplib,
     ppx_sexp_conv
 
+Executable "miniml-debug"
+  Path: src
+  MainIs: miniml.ml
+  CompiledObject: byte
+  BuildDepends:
+    core,
+    sexplib,
+    ppx_sexp_conv
+
 Library "miniml"
   FindLibName: miniml
   Path: src
@@ -24,7 +33,9 @@ Library "miniml"
     Miniml_parser,
     Miniml_lexer,
     Ast,
-    Typecheck
+    Typecheck,
+    Interp,
+    Util
 
 Executable "test_miniml"
   Path: test

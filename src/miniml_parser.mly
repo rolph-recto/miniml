@@ -47,8 +47,14 @@
 %right    RARROW
 %left     STAR
 %left     BINOP
-%left    app
+%left     INT
+%left     FLOAT
+%left     ID
+%left     CON
+%left     TYVAR
+%left     STRING
 %left     PERIOD
+%left     app
 
 %start <Ast.progdef list> prog
 
@@ -154,15 +160,15 @@ pattern:
 
   | LPAREN; RPAREN                      { PatUnit }
 
-  | v = INT                             { PatILit(v) }
+  | v = INT                             { PatInt(v) }
 
-  | v = FLOAT                           { PatFLit(v) }
+  | v = FLOAT                           { PatFloat(v) }
 
-  | v = STRING                          { PatSLit(v) }
+  | v = STRING                          { PatStr(v) }
 
-  | v = TRUE                            { PatBLit(true) }
+  | v = TRUE                            { PatBool(true) }
 
-  | v = FALSE                           { PatBLit(false) }
+  | v = FALSE                           { PatBool(false) }
 
   | v = UNDERSCORE                      { PatWildcard }
 
@@ -186,15 +192,15 @@ expr_id:
 
 
 expr:
-  | v = INT                             { ILit(v) }
+  | v = INT                             { IntLit(v) }
 
-  | v = FLOAT                           { FLit(v) }
+  | v = FLOAT                           { FloatLit(v) }
 
-  | v = STRING                          { SLit(v) }
+  | v = STRING                          { StrLit(v) }
 
-  | v = TRUE                            { BLit(true) }
+  | v = TRUE                            { BoolLit(true) }
 
-  | v = FALSE                           { BLit(false) }
+  | v = FALSE                           { BoolLit(false) }
 
   | name = expr_id                      { Var(name) }
 
@@ -237,13 +243,13 @@ expr:
 
   | BEGIN; e = expr; END                { e }
 
-  | f = expr; arg = expr                { App(f, arg) }
+  | f = expr; arg = expr                { App(f, arg) } %prec app
 
   (* mult has to be a special case because STAR is a special token
    * that is also used by product types *)
-  | a1 = expr; op = STAR; a2 = expr     { App(App(Var("*"), a1), a2) }
+  | a1 = expr; op = STAR; a2 = expr     { App(App(Var("*"), a1), a2) } %prec app
 
-  | a1 = expr; op = EQ; a2 = expr       { App(App(Var("="), a1), a2) }
+  | a1 = expr; op = EQ; a2 = expr       { App(App(Var("="), a1), a2) } %prec app
 
   (* support infix binary operations *)
   | a1 = expr; op = BINOP; a2 = expr    { App(App(Var(op), a1), a2) } %prec app

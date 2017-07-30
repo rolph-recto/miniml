@@ -1,3 +1,4 @@
+open Core.Std
 open Sexplib.Std
 
 type name = string [@@deriving sexp]
@@ -41,15 +42,21 @@ let name_of_id (id : id) : name =
   | IdWithType(name,t) -> name
 ;;
 
+let type_of_id (id : id) : tyname option =
+  match id with
+  | Id(name) -> None
+  | IdWithType(name,t) -> Some(t)
+;;
+
 type pattern = 
   | PatCon of name * pattern 
   | PatConEmpty of name
   | PatTuple of pattern list
   | PatUnit
-  | PatILit of int
-  | PatFLit of float
-  | PatSLit of string
-  | PatBLit of bool
+  | PatInt of int
+  | PatFloat of float
+  | PatStr of string
+  | PatBool of bool
   | PatVar of string
   | PatWildcard
   [@@deriving sexp]
@@ -57,12 +64,12 @@ type pattern =
 type case = { match_pat: pattern; body: expr } [@@deriving sexp]
 and field = { name: name; value: expr } [@@deriving sexp]
 and expr =  
-  | ILit of int
-  | FLit of float
-  | SLit of string
-  | BLit of bool
-  | Var of name
+  | IntLit of int
+  | FloatLit of float
+  | StrLit of string
+  | BoolLit of bool
   | Unit
+  | Var of name
   | Tuple of expr list (* list must be non-empty, otherwise it's a unit *)
   | Rec of field list
   | Field of expr * name
@@ -88,3 +95,27 @@ let type_string  = TyCon("string", [])
 let type_bool    = TyCon("bool", [])
 let type_unit    = TyCon("unit", [])
 
+type interp_val = 
+  | IntVal of int
+  | FloatVal of float
+  | StrVal of string
+  | BoolVal of bool
+  | UnitVal
+  | TupleVal of interp_val list
+  | RecVal of field_vals
+  | ConVal of name * interp_val
+  | ConEmptyVal of name
+  | ClosureVal of interp_env * name * expr
+  | SysClosureVal of (interp_val -> (interp_val, interp_err) Result.t)
+  [@@deriving sexp]
+and field_vals = (name * interp_val) list
+and interp_err =
+  | UnboundVar of name
+  | FieldNotFound of interp_val * name
+  | PredicateNotBool of interp_val
+  | ApplyNotFunc of interp_val
+  | UnmatchedVal of interp_val
+  | UnexpectedArg of interp_val
+  | UserException of string
+  [@@deriving sexp]
+and interp_env = interp_val String.Map.t

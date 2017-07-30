@@ -1,9 +1,11 @@
 _build/*
+.vscode/*
 *.native
 *.swp
 *.log
 *.mllib
 *.mldylib
+*.byte
 setup.ml
 _tags
 myocamlbuild.ml

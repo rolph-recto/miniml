@@ -218,12 +218,19 @@ let instantiate (st : infer_st) (s : tyscheme) : tyname =
   let (_, t) = instantiate' st s in t
 ;;
 
+let alphabet = ["a"; "b"; "c"; "d"; "e"; "f"; "g"; "h"; "i"; "j"; "k"; "l"; "m";
+                "n"; "o"; "p"; "q"; "r"; "s"; "t"; "u"; "v"; "w"; "x"; "y"; "z"]
+
 let generalize (env : tyenv) (t : tyname) : tyscheme =
   let ftv_env = Map.data env.bindings |> TyschemeListSub.free_vars in
   let ftv     = TynameSub.free_vars t in
   let tvs     = SSet.diff ftv ftv_env |> SSet.to_list in
-  (tvs, t)
-;;
+  let tvs'    = List.sub alphabet ~pos:0 ~len:(List.length tvs) in
+  let vars'   = List.map tvs' ~f:(fun x -> TyVar x) in
+  let subst   = String.Map.of_alist_exn (List.zip_exn tvs vars') in
+  let t'      = TynameSub.apply subst t in
+  (tvs', t')
+;; 
 
 (* whenever we lookup a binding, "monomorphize" by instantiating
  * free vars with fresh vars. this allows for let-generalization by
@@ -245,13 +252,13 @@ let field_compare (f1 : tyfield) (f2 : tyfield) : int =
 
 let rec infer (st : infer_st) (env : tyenv) (e : expr) : tyname =
   match e with
-  | ILit(_)   -> type_int
+  | IntLit(_)   -> type_int
 
-  | FLit(_)   -> type_float
+  | FloatLit(_)   -> type_float
 
-  | SLit(_)   -> type_string
+  | StrLit(_)   -> type_string
 
-  | BLit(_)   -> type_bool
+  | BoolLit(_)   -> type_bool
 
   | Var(name) -> lookupEnv st env name
 
@@ -392,13 +399,13 @@ and pat_infer (st : infer_st) (env : tyenv) (pat : pattern) : tyname * tyenv =
   match pat with
   | PatUnit     -> (type_unit, env)
 
-  | PatILit(_)  -> (type_int, env)
+  | PatInt(_)  -> (type_int, env)
 
-  | PatFLit(_)  -> (type_float, env)
+  | PatFloat(_)  -> (type_float, env)
 
-  | PatSLit(_)  -> (type_string, env)
+  | PatStr(_)  -> (type_string, env)
 
-  | PatBLit(_)  -> (type_bool, env)
+  | PatBool(_)  -> (type_bool, env)
 
   | PatVar(v)   ->
     let t     = fresh_var st in
@@ -534,10 +541,10 @@ let rec solve (env : tyenv) (s : subst) (cons : constr list) : subst =
 ;;
 
 type tycheck_info = {
+  subst: subst;
   env: tyenv;
   constraints: constr list;
   progdefs: progdef list;
-  subst: subst;
 }
 
 type error_info = {
@@ -547,25 +554,52 @@ type error_info = {
   progdefs: progdef list;
 }
 
-let check_type_prog (prog : progdef list) : (tycheck_info, error_info) Result.t =
+type 'a tyinfo = {
+  info: 'a;
+  env: tyenv;
+  constraints: constr list;
+  progdefs: progdef list;
+}
+
+type tyinfo_ok  = subst tyinfo
+type tyinfo_err = tyerror tyinfo
+
+let base_env = { empty_env with
+  bindings = String.Map.of_alist_exn [
+    "+", ([], TyFunc(type_int, TyFunc(type_int, type_int)));
+    "-", ([], TyFunc(type_int, TyFunc(type_int, type_int)));
+    "*", ([], TyFunc(type_int, TyFunc(type_int, type_int)));
+    "/", ([], TyFunc(type_int, TyFunc(type_int, type_int)));
+    "+.", ([], TyFunc(type_float, TyFunc(type_float, type_float)));
+    "-.", ([], TyFunc(type_float, TyFunc(type_float, type_float)));
+    "*.", ([], TyFunc(type_float, TyFunc(type_float, type_float)));
+    "/.", ([], TyFunc(type_float, TyFunc(type_float, type_float)));
+    "^", ([], TyFunc(type_string, TyFunc(type_string, type_string)));
+    "error", (["'a"], TyFunc(type_string, TyVar "'a"));
+  ];
+}
+
+let check_type_prog (prog : progdef list) : (tyinfo_ok, tyinfo_err) Result.t =
   let st : infer_st = { count=0; constraints=[] } in
   let check_type_progdef st env progdef = 
     begin match progdef with
-    | Binding(Id(name), expr) ->
+    | Binding(id, expr) ->
       (* TODO: add pass to replace all type synonyms with their definitions
        * for all type annotations within the expr *)
+      let name      = name_of_id id in
       let t         = infer st env expr in
-      let bindings' = String.Map.add env.bindings name ([], t) in
+      (* SUPER IMPORTANT: we have to do unification IMMEDIATELY here or else
+      we will not be able to correctly generalize the "shape" of the type!
+      this becomes obvious when typechecking recursive bindings, where the
+      inferred type (without unification) is just a fresh type variable instead of a 
+      function type! *)
+      let subst     = solve env null_subst st.constraints in
+      let t'        = TynameSub.apply subst t in
+      let ts        = generalize env t' in
+      let bindings' = String.Map.add env.bindings name ts in
       let env'      = { env with bindings = bindings' } in
-      env'
-
-    | Binding(IdWithType(name,tannot), expr) ->
-      (* TODO: add pass to replace all type synonyms with their definitions
-       * for all type annotations within the expr *)
-      let t         = infer st env expr in
-      let bindings' = String.Map.add env.bindings name ([], t) in
-      let env'      = { env with bindings = bindings' } in
-      add_constraint st tannot t;
+      let tannot    = type_of_id id in
+      if Option.is_some tannot then add_constraint st (Option.value_exn tannot) t;
       env'
 
     | Typedef(tydef) ->
@@ -616,7 +650,7 @@ let check_type_prog (prog : progdef list) : (tycheck_info, error_info) Result.t 
      * ((TyVar v0), (TyFunc (TyCon int ()) (TyVar v2)))
      * ((TyVar v2), (TyFunc (TyCon int ()) (TyVar v3)))
      *)
-    let final_env     = List.fold prog ~init:empty_env ~f:(check_type_progdef st) in
+    let final_env     = List.fold prog ~init:base_env ~f:(check_type_progdef st) in
     st.constraints    <- List.rev st.constraints;
     let subst         = solve final_env null_subst st.constraints in
     let principal_env = { final_env with
@@ -624,20 +658,19 @@ let check_type_prog (prog : progdef list) : (tycheck_info, error_info) Result.t 
       tysyms = Map.map final_env.tysyms (TyschemeSub.apply subst);
     } in
     let res = {
+      info = subst;
       env = principal_env;
       constraints = st.constraints;
       progdefs = prog;
-      subst = subst;
     } in
-    Ok(res) 
+    Ok(res)
   end with
   | TypeError(env, tyerr) ->
     let info = {
-      tyerror = tyerr;
+      info = tyerr;
       env = env;
       constraints = st.constraints;
       progdefs = prog;
     } in
     Error(info)
 ;;
-
